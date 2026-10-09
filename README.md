@@ -93,7 +93,11 @@ cd ..\frontend
 pnpm build
 ```
 
-Testes simulam as APIs, sem gastar cotas: consenso, uma única discordância, confirmação do juiz, limite de rodadas, fontes, pesquisa indisponível, preços pagos, cota, cancelamento, reconexão SSE, histórico, exportação e recuperação após reinício. A integração com respostas reais exige chaves e disponibilidade dos serviços; não foi validada nesta entrega, por opção do usuário.
+Testes simulam as APIs, sem gastar cotas: consenso, uma única discordância, confirmação do juiz, limite de rodadas, fontes, pesquisa indisponível, preços pagos, cota, cancelamento, reconexão SSE, histórico, exportação e recuperação após reinício. Também cobrem respostas vazias, raciocínio sem fala, JSON no formato incorreto, recusas e campos de faturamento nulos. As chamadas reais de defesa, oposição e extração de afirmações foram verificadas durante a depuração; disponibilidade e limites externos podem impedir o julgamento completo.
+
+Se um modelo consumir a geração em raciocínio e retornar uma fala vazia, o backend aumenta o limite e tenta novamente, até três chamadas. Quando permitido pelo catálogo, o raciocínio opcional é desativado. O raciocínio interno nunca é usado como fala. Se o formato JSON estiver incorreto, a próxima tentativa recebe os erros de validação. Erros persistentes preservam o histórico e exibem uma mensagem específica.
+
+Um erro 429 do OpenRouter indica limite de requisições ou capacidade: aguarde ou escolha outro modelo gratuito e inicie uma nova partida. Se o Tavily devolver limites de faturamento vazios ou ausentes, a busca permanece bloqueada até ser possível confirmar a configuração gratuita; essa condição não vira uma falha genérica.
 
 ## Limitações da primeira versão
 

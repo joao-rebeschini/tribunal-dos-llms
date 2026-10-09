@@ -1,5 +1,6 @@
 import asyncio
 import os
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from .demo import fixture, replay
 from .report import report
 
 BASE = Path(__file__).resolve().parents[1]
+logger = logging.getLogger('tribunal')
 load_dotenv(BASE / '.env')
 
 def create_app(db_path=None, llm=None, search=None, demo_delay=0.9):
@@ -22,10 +24,10 @@ def create_app(db_path=None, llm=None, search=None, demo_delay=0.9):
     router = llm or OpenRouter(os.getenv('OPENROUTER_API_KEY', ''))
     researcher = search or Tavily(os.getenv('TAVILY_API_KEY', ''), store, int(os.getenv('TAVILY_MONTHLY_BUDGET', '1000')))
     tasks = {}
-    store.recover()
 
     @asynccontextmanager
     async def lifespan(app):
+        store.recover()
         yield
         for task in tasks.values():
             task.cancel()
@@ -57,11 +59,13 @@ def create_app(db_path=None, llm=None, search=None, demo_delay=0.9):
             raise
         except ProviderError as exc:
             store.update(mid, 'interrupted')
-            store.event(mid, 'interrupted', {'message': str(exc)})
-        except Exception:
+            store.event(mid, 'interrupted', {'message': str(exc), 'code': exc.code, 'details': exc.details})
+        except Exception as exc:
             # Não expõe respostas externas, cabeçalhos ou segredos em erros.
+            logger.error('Falha inesperada partida=%s tipo=%s', mid, type(exc).__name__)
             store.update(mid, 'interrupted')
-            store.event(mid, 'interrupted', {'message': 'Falha inesperada na execução. Progresso preservado; nenhum resultado foi fabricado.'})
+            store.event(mid, 'interrupted', {'message': 'Falha inesperada na execução. Progresso preservado; nenhum resultado foi fabricado.',
+                                          'code': 'unexpected_error', 'details': {'exception_type': type(exc).__name__}})
 
     def launch(mid, demo=False):
         task = asyncio.create_task(execute(mid, demo))

@@ -103,7 +103,8 @@ async def test_openrouter_rejects_paid_and_quota():
         router = OpenRouter('SECRET_TEST_TOKEN',client)
         with pytest.raises(ProviderError): await router.complete('paid','system',{},Speech)
         assert posts==[]
-        with pytest.raises(ProviderError, match='Cota'): await router.complete('free','system',{},Speech)
+        with pytest.raises(ProviderError, match='limite de requisições') as error: await router.complete('free','system',{},Speech)
+        assert error.value.code == 'provider_rate_limit'
         assert len(posts)==1 and posts[0]['provider']['max_price']['prompt']==0
         assert 'models' not in posts[0] and posts[0]['provider']['allow_fallbacks'] is False
 

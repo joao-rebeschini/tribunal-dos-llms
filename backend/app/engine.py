@@ -63,7 +63,7 @@ class Tribunal:
             except SearchUnavailable as exc:
                 sources = []
                 checked = {'status': 'inconclusiva', 'explanation': str(exc), 'source_ids': []}
-                self.emit('warning', {'message': str(exc), 'round': round})
+                self.emit('warning', {'message': str(exc), 'round': round, 'code': exc.code, 'details': exc.details})
             else:
                 if sources:
                     checked = await self.ask('verificador', 'Classifique a afirmação exclusivamente com base nas fontes fornecidas. source_ids deve conter somente IDs relevantes das fontes. Se elas não sustentam nem contradizem a afirmação, classifique como inconclusiva. Não confunda falta de evidências com contradição.', round, Verification, {'claim': claim, 'sources': sources}, phase='pesquisa')

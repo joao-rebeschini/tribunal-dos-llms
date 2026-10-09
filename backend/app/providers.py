@@ -6,7 +6,10 @@ from urllib.parse import urlparse
 import httpx
 
 class ProviderError(Exception):
-    pass
+    def __init__(self, message, code='provider_error', details=None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
 
 class SearchUnavailable(ProviderError):
     pass
@@ -24,6 +27,30 @@ def safe_url(url):
     parsed = urlparse(url)
     return parsed.scheme in ('https', 'http') and bool(parsed.netloc)
 
+def output_example(schema):
+    """Mostra uma instância de dados, evitando que o modelo devolva o JSON Schema."""
+    definition = schema.model_json_schema()
+    def sample(node):
+        if '$ref' in node:
+            return sample(definition['$defs'][node['$ref'].split('/')[-1]])
+        if 'enum' in node:
+            return node['enum'][0]
+        kind = node.get('type')
+        if kind == 'object':
+            properties = node.get('properties', {})
+            if properties:
+                return {name: sample(value) for name, value in properties.items()}
+            names = node.get('propertyNames', {}).get('enum', [])
+            return {name: sample(node['additionalProperties']) for name in names}
+        if kind == 'array':
+            return [sample(node['items'])]
+        if kind == 'boolean':
+            return False
+        if kind in ('number', 'integer'):
+            return max(node.get('minimum', 0), 0)
+        return 'Substitua pelo conteúdo correspondente ao contexto.'
+    return sample(definition)
+
 class OpenRouter:
     def __init__(self, key, client=None):
         self.key = key
@@ -33,7 +60,11 @@ class OpenRouter:
         try:
             response = await self.client.get('https://openrouter.ai/api/v1/models')
             response.raise_for_status()
-            return sorted([{'id': m['id'], 'name': m['name']} for m in response.json()['data']
+            return sorted([{'id': m['id'], 'name': m['name'],
+                            'reasoning': m.get('reasoning'),
+                            'supported_parameters': m.get('supported_parameters', []),
+                            'max_completion_tokens': (m.get('top_provider') or {}).get('max_completion_tokens')}
+                           for m in response.json()['data']
                            if free_model(m) and m['id'] != 'openrouter/free'], key=lambda x: x['name'])
         except (httpx.HTTPError, ValueError, KeyError) as exc:
             raise ProviderError('Não foi possível consultar o catálogo de modelos gratuitos.') from exc
@@ -42,19 +73,44 @@ class OpenRouter:
         if not self.key:
             raise ProviderError('Configure OPENROUTER_API_KEY no ambiente do backend.')
         # Revalida preços antes de toda chamada. Não usa roteador nem fallback de modelo.
-        if model not in {m['id'] for m in await self.models()}:
+        selected = next((m for m in await self.models() if m['id'] == model), None)
+        if selected is None:
             raise ProviderError('Modelo indisponível ou com preço diferente de zero. Partida interrompida.')
+        output_limit = selected.get('max_completion_tokens') or 16384
         payload = {'model': model, 'messages': [
-            {'role': 'system', 'content': system + '\nResponda somente JSON neste esquema: ' + json.dumps(schema.model_json_schema(), ensure_ascii=False)},
+            {'role': 'system', 'content': system + '\nGere uma instância JSON de dados, não o JSON Schema. '
+             'Não envolva os campos em properties e não devolva metadados como title, type ou required. '
+             'O exemplo a seguir mostra somente o formato: substitua todos os valores conforme o contexto. Exemplo: '
+             + json.dumps(output_example(schema), ensure_ascii=False) + '\nEsquema de validação: '
+             + json.dumps(schema.model_json_schema(), ensure_ascii=False)},
             {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}],
-            'max_tokens': 1400, 'temperature': 0.4,
+            'max_tokens': min(4096, output_limit), 'temperature': 0.4,
             'provider': {'allow_fallbacks': False, 'max_price': {'prompt': 0, 'completion': 0, 'request': 0, 'image': 0}}}
+        reasoning = selected.get('reasoning')
+        if reasoning is not None:
+            if not reasoning.get('mandatory', False):
+                payload['reasoning'] = {'enabled': False, 'exclude': True}
+            elif reasoning.get('supports_max_tokens'):
+                payload['reasoning'] = {'max_tokens': 512, 'exclude': True}
+            else:
+                efforts = reasoning.get('supported_efforts')
+                effort = next((level for level in ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+                               if efforts is None or level in efforts), None)
+                if effort:
+                    payload['reasoning'] = {'effort': effort, 'exclude': True}
+        parameters = selected.get('supported_parameters', [])
+        if 'response_format' in parameters:
+            payload['response_format'] = {'type': 'json_object'}
         for attempt in range(3):
             try:
                 response = await self.client.post('https://openrouter.ai/api/v1/chat/completions',
                     headers={'Authorization': f'Bearer {self.key}', 'X-Title': 'Tribunal dos LLMs'}, json=payload)
-                if response.status_code in (402, 429):
-                    raise ProviderError('Cota ou capacidade gratuita esgotada. Progresso preservado; nenhum modelo pago foi usado.')
+                if response.status_code == 429:
+                    raise ProviderError('O modelo gratuito selecionado atingiu um limite de requisições ou de capacidade. Aguarde ou selecione outro modelo gratuito e inicie uma nova partida. Progresso preservado.',
+                                        code='provider_rate_limit', details={'http_status': 429, 'model': model})
+                if response.status_code == 402:
+                    raise ProviderError('Cota gratuita da conta indisponível. Progresso preservado; nenhum modelo pago foi usado.',
+                                        code='provider_quota', details={'http_status': 402, 'model': model})
                 if response.status_code >= 500 and attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -64,15 +120,42 @@ class OpenRouter:
                 actual = data.get('model')
                 if actual not in {model, model.removesuffix(':free')}:
                     raise ProviderError('O provedor retornou um modelo diferente do selecionado; execução interrompida.')
-                content = data['choices'][0]['message']['content']
+                choices = data.get('choices')
+                if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                    raise ProviderError('O provedor retornou uma resposta sem alternativas válidas. Progresso preservado.',
+                                        code='provider_invalid_response')
+                choice = choices[0]
+                message = choice.get('message') or {}
+                if not isinstance(message, dict):
+                    raise ProviderError('O provedor retornou uma mensagem inválida. Progresso preservado.',
+                                        code='provider_invalid_response')
+                content = message.get('content')
+                if isinstance(content, list):
+                    content = ''.join(part.get('text', '') for part in content
+                                      if isinstance(part, dict) and part.get('type') == 'text'
+                                      and isinstance(part.get('text'), str))
+                if not isinstance(content, str) or not content.strip():
+                    if message.get('refusal'):
+                        raise ProviderError('O modelo recusou responder à solicitação. Reformule a pergunta.',
+                                            code='provider_refusal')
+                    if attempt < 2:
+                        payload['max_tokens'] = min(payload['max_tokens'] * 2, output_limit)
+                        continue
+                    raise ProviderError('O modelo retornou a fala vazia após três tentativas. O limite de geração pode ter sido consumido pelo raciocínio interno. Tente outro modelo gratuito.',
+                                        code='provider_empty_output', details={'finish_reason': choice.get('finish_reason'), 'attempts': 3})
                 content = re.sub(r'^```(?:json)?\s*|\s*```$', '', content.strip())
                 try:
                     result = schema.model_validate_json(content)
-                except ValueError:
+                except ValueError as exc:
                     if attempt < 2:
-                        payload['messages'].append({'role': 'user', 'content': 'Corrija a resposta: JSON válido, esquema exato e até 180 palavras em text.'})
+                        if choice.get('finish_reason') == 'length':
+                            payload['max_tokens'] = min(payload['max_tokens'] * 2, output_limit)
+                        payload['messages'].append({'role': 'assistant', 'content': content[:12000]})
+                        errors = exc.errors(include_url=False, include_context=False, include_input=False) if hasattr(exc, 'errors') else []
+                        payload['messages'].append({'role': 'user', 'content': 'Corrija a resposta anterior: gere o objeto de dados, não o esquema. JSON válido, campos exatos e até 180 palavras em text. Erros de validação: ' + json.dumps(errors, ensure_ascii=False)})
                         continue
-                    raise ProviderError('O modelo não respondeu no formato esperado após três tentativas.')
+                    raise ProviderError('O modelo não respondeu no formato esperado após três tentativas.',
+                                        code='provider_invalid_json', details={'finish_reason': choice.get('finish_reason'), 'attempts': 3})
                 return result.model_dump(), actual
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 if attempt == 2:
@@ -99,7 +182,10 @@ class Tavily:
             usage_response = await self.client.get('https://api.tavily.com/usage', headers=headers)
             if usage_response.status_code != 200:
                 raise SearchUnavailable('Não foi possível confirmar a cota gratuita do Tavily; busca bloqueada.')
-            account = usage_response.json().get('account', {})
+            account = usage_response.json().get('account') or {}
+            if any(account.get(field) is None for field in ('paygo_limit', 'paygo_usage', 'plan_usage', 'plan_limit')):
+                raise SearchUnavailable('O Tavily não confirmou todos os limites de faturamento (campo vazio ou ausente). Por segurança, a busca foi bloqueada e a afirmação permanece inconclusiva.',
+                                        code='search_billing_unknown')
             if (str(account.get('current_plan', '')).lower() not in ('free', 'researcher') or
                 float(account.get('paygo_limit', -1)) != 0 or
                 float(account.get('paygo_usage', -1)) != 0 or
