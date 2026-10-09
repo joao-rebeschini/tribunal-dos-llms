@@ -1,3 +1,7 @@
+"""Regressões dos contratos HTTP, respostas vazias, cotas e faturamento.
+
+MockTransport substitui as APIs externas; TestClient valida os eventos e a criação de partidas."""
+
 import json
 import httpx
 import pytest

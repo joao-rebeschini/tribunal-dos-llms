@@ -1,4 +1,7 @@
+"""Exportação da audiência salva para Markdown em português, sem novas chamadas externas."""
+
 def report(match, events):
+    """Monta Markdown a partir da partida e dos eventos, incluindo avisos, fontes e julgamento disponível."""
     lines = ['# Tribunal dos LLMs', '', f"**Pergunta:** {match['question']}",
              f"**Modo:** {'Demonstração pré-gravada, com conteúdo ilustrativo' if match['demo'] else 'Debate real'}",
              f"**Estado:** {match['status']}", '**Avaliação:** julgamento automatizado.', '']

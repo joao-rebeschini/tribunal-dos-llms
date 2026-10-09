@@ -1,3 +1,6 @@
+/* Identidade visual, cenário e sprites CSS, painéis e controles de reprodução.
+ * Regras responsivas e prefers-reduced-motion ficam junto aos ajustes finais.
+ * Balões são posicionados em relação à estação do participante ativo. */
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 :root {
   font-family:

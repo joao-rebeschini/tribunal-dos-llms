@@ -1,3 +1,7 @@
+"""Contratos Pydantic das perguntas, falas e julgamentos, e regra de consenso.
+
+Os nomes dos campos também definem o JSON solicitado aos modelos. Consulte docs/PROMPTS.md."""
+
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
@@ -70,6 +74,7 @@ class MatchRequest(BaseModel):
         return value
 
 def consensus_valid(proposal, acceptances):
+    """Exige resposta à pergunta e aceitação explícita do texto idêntico pelos dois debatedores."""
     return bool(proposal['answers_question'] and all(
         acceptances[r]['accepted'] is True and
         acceptances[r]['conclusion'] == proposal['conclusion']

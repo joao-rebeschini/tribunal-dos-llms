@@ -1,3 +1,7 @@
+"""Adaptadores HTTP do OpenRouter e Tavily com validação e bloqueios de custo.
+
+Erros esperados usam ProviderError; falhas de busca usam SearchUnavailable para preservar o debate."""
+
 import asyncio
 import json
 import re
@@ -16,6 +20,7 @@ class SearchUnavailable(ProviderError):
     pass
 
 def free_model(model):
+    """Aceita apenas saída textual e preços declarados iguais a zero em todas as taxas."""
     pricing = model.get('pricing', {})
     try:
         return pricing.get('prompt') is not None and pricing.get('completion') is not None and 'text' in model.get('architecture', {}).get('output_modalities', ['text']) and all(
@@ -25,6 +30,7 @@ def free_model(model):
         return False
 
 def safe_url(url):
+    """Filtra URLs de fontes por esquema HTTP(S) e host; não verifica a confiabilidade editorial."""
     parsed = urlparse(url)
     return parsed.scheme in ('https', 'http') and bool(parsed.netloc)
 
@@ -58,6 +64,7 @@ class OpenRouter:
         self.client = client or httpx.AsyncClient(timeout=90)
 
     async def limits(self):
+        """Consulta o contador diário da conta e devolve apenas franquia e renovação prevista UTC."""
         try:
             response = await self.client.get('https://openrouter.ai/api/v1/key',
                 headers={'Authorization': f'Bearer {self.key}'})
@@ -75,6 +82,7 @@ class OpenRouter:
             raise ProviderError('Não foi possível consultar a franquia gratuita do OpenRouter.', code='provider_limits_unavailable') from exc
 
     async def models(self):
+        """Consulta e filtra o catálogo atual, preservando capacidades necessárias à geração."""
         try:
             response = await self.client.get('https://openrouter.ai/api/v1/models')
             response.raise_for_status()
@@ -88,6 +96,9 @@ class OpenRouter:
             raise ProviderError('Não foi possível consultar o catálogo de modelos gratuitos.') from exc
 
     async def complete(self, model, system, context, schema):
+        """Revalida o modelo gratuito, gera JSON e valida o schema em até três tentativas.
+        
+        Não troca de modelo nem usa raciocínio interno como fala. Cotas interrompem a execução."""
         if not self.key:
             raise ProviderError('Configure OPENROUTER_API_KEY no ambiente do backend.')
         # Revalida preços antes de toda chamada. Não usa roteador nem fallback de modelo.
@@ -194,6 +205,9 @@ class Tavily:
         self.client = client or httpx.AsyncClient(timeout=30)
 
     async def search(self, query):
+        """Usa cache ou confirma a franquia antes de reservar uma busca basic.
+        
+        Não repete POST incerto; uma falha gera SearchUnavailable em vez de evidência inventada."""
         query = ' '.join(query.lower().split())
         cached = self.store.cached(query)
         if cached is not None:

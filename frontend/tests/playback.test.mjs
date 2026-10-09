@@ -1,3 +1,5 @@
+// Testes determinísticos da fila: ordem, pausa, Unicode, velocidade, replay e avanço.
+// Rodam no Node com suporte a TypeScript, sem navegador ou APIs externas.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Playback } from '../src/playback.ts';

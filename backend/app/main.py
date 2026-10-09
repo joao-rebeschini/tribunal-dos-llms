@@ -1,3 +1,7 @@
+"""Aplicação FastAPI, ciclo de vida das tarefas, API REST e replay SSE.
+
+O objeto app é usado pelo Uvicorn. A recuperação de partidas ocorre no lifespan, não no import."""
+
 import asyncio
 import os
 import logging
@@ -20,6 +24,7 @@ logger = logging.getLogger('tribunal')
 load_dotenv(BASE / '.env')
 
 def create_app(db_path=None, llm=None, search=None, demo_delay=0.9):
+    """Constrói uma aplicação com banco e provedores injetáveis para execução local e testes."""
     store = Store(db_path or BASE / os.getenv('TRIBUNAL_DB', 'data/tribunal.sqlite3'))
     router = llm or OpenRouter(os.getenv('OPENROUTER_API_KEY', ''))
     researcher = search or Tavily(os.getenv('TAVILY_API_KEY', ''), store, int(os.getenv('TAVILY_MONTHLY_BUDGET', '1000')))
