@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+dist/
+data/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+*.tsbuildinfo
+work/
