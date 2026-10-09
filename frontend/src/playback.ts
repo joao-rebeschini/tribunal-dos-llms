@@ -1,3 +1,6 @@
+/** Fila determinística de leitura, independente de rede e React.
+ * source preserva eventos completos; visible pode conter uma cópia parcial da fala atual.
+ * tick recebe milissegundos; a pausa manual mantém a fala até next(). */
 export type PlayableEvent = { id: number; type: string; data: { text?: string } };
 
 // A fila de leitura não altera nem bloqueia os eventos recebidos do servidor.

@@ -1,3 +1,7 @@
+"""Testes do grafo, consenso, notas, fontes, persistência, SSE e limites de custo.
+
+LLMs e buscas simulados permitem validar o fluxo sem chaves nem consumo de franquias."""
+
 import asyncio
 import json
 import httpx

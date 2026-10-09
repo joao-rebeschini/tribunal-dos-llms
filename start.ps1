@@ -1,3 +1,5 @@
+# Inicia o backend com o frontend já compilado; não instala nem recompila dependências.
+# Uso na raiz: .\start.ps1 -Port 8000. O servidor permanece em primeiro plano.
 param([int]$Port = 8000)
 $ErrorActionPreference = 'Stop'
 $projectPath = $PSScriptRoot

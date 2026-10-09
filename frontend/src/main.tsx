@@ -1,3 +1,6 @@
+/** Interface React: configuração, eventos SSE, apresentação, histórico e evidências.
+ * receivedEvents contém o histórico recebido; Playback decide o que já pode aparecer.
+ * Pausa da leitura não cancela chamadas do backend. Veja docs/ARQUITETURA.md. */
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
