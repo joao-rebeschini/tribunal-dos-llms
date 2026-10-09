@@ -166,3 +166,43 @@ def test_app_construction_does_not_interrupt_another_running_server(tmp_path):
     assert store.get(mid)['status'] == 'running'
     with TestClient(app):
         assert store.get(mid)['status'] == 'interrupted'
+
+
+@pytest.mark.asyncio
+async def test_openrouter_limits_exposes_only_daily_counter():
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
+        'data': {'label': 'PRIVATE_KEY_NAME', 'limit_remaining': 100, 'free_model_daily_requests': {'used': 59, 'limit': 50, 'remaining': 0}}
+    }))) as client:
+        quota = await OpenRouter('TEST_TOKEN', client).limits()
+    assert quota['daily'] == {'used': 59, 'limit': 50, 'remaining': 0}
+    assert quota['reset_at'].endswith('00:00:00+00:00')
+    assert 'PRIVATE_KEY_NAME' not in json.dumps(quota) and 'limit_remaining' not in quota
+
+
+def test_daily_quota_preflight_does_not_start_or_save_a_failed_match(tmp_path):
+    class ExhaustedRouter:
+        async def limits(self):
+            return {'daily': {'used': 50, 'limit': 50, 'remaining': 0}, 'reset_at': None}
+        async def models(self):
+            raise AssertionError('Não deve avançar após franquia esgotada.')
+    app = create_app(tmp_path / 'db.sqlite', llm=ExhaustedRouter(), demo_delay=0)
+    with TestClient(app) as client:
+        assert client.get('/api/limits').json()['daily']['remaining'] == 0
+        response = client.post('/api/matches', json={'question': 'Uma pergunta para o tribunal?', 'models': {role: 'test/free' for role in ROLES}})
+        assert response.status_code == 429
+        assert client.get('/api/matches').json() == []
+        assert client.post('/api/demo').status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_daily_request_limit_is_not_reported_as_model_capacity():
+    def handler(request):
+        if request.method == 'GET':
+            return httpx.Response(200, json={'data': [{'id':'test/free','name':'Teste','pricing':{'prompt':'0','completion':'0'}}]})
+        return httpx.Response(429, json={'error': {'message': 'Rate limit exceeded: free-models-per-day',
+            'metadata': {'limit_source': 'openrouter_free_tier_daily'}}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ProviderError) as error:
+            await OpenRouter('TEST_TOKEN', client).complete('test/free', 'Teste', {}, Speech)
+    assert error.value.code == 'provider_daily_limit'
+    assert 'trocar de modelo não renova' in str(error.value)

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 import httpx
@@ -56,6 +57,23 @@ class OpenRouter:
         self.key = key
         self.client = client or httpx.AsyncClient(timeout=90)
 
+    async def limits(self):
+        try:
+            response = await self.client.get('https://openrouter.ai/api/v1/key',
+                headers={'Authorization': f'Bearer {self.key}'})
+            response.raise_for_status()
+            daily = response.json().get('data', {}).get('free_model_daily_requests')
+            if not isinstance(daily, dict):
+                return {'daily': None, 'reset_at': None}
+            values = {name: daily.get(name) for name in ('used', 'limit', 'remaining')}
+            if any(not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0 for value in values.values()):
+                raise ValueError('Contador diário inválido.')
+            now = datetime.now(timezone.utc)
+            reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            return {'daily': values, 'reset_at': reset.isoformat()}
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise ProviderError('Não foi possível consultar a franquia gratuita do OpenRouter.', code='provider_limits_unavailable') from exc
+
     async def models(self):
         try:
             response = await self.client.get('https://openrouter.ai/api/v1/models')
@@ -106,6 +124,11 @@ class OpenRouter:
                 response = await self.client.post('https://openrouter.ai/api/v1/chat/completions',
                     headers={'Authorization': f'Bearer {self.key}', 'X-Title': 'Tribunal dos LLMs'}, json=payload)
                 if response.status_code == 429:
+                    error = response.json().get('error') or {}
+                    metadata = error.get('metadata') or {}
+                    if metadata.get('limit_source') == 'openrouter_free_tier_daily' or 'free-models-per-day' in str(error.get('message', '')):
+                        raise ProviderError('A franquia diária de requisições gratuitas do OpenRouter acabou. Esse limite é compartilhado pela conta; trocar de modelo não renova a franquia. Aguarde a renovação diária ou use a demonstração.',
+                                            code='provider_daily_limit', details={'http_status': 429, 'model': model})
                     raise ProviderError('O modelo gratuito selecionado atingiu um limite de requisições ou de capacidade. Aguarde ou selecione outro modelo gratuito e inicie uma nova partida. Progresso preservado.',
                                         code='provider_rate_limit', details={'http_status': 429, 'model': model})
                 if response.status_code == 402:

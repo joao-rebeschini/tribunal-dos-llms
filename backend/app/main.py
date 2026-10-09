@@ -83,11 +83,24 @@ def create_app(db_path=None, llm=None, search=None, demo_delay=0.9):
         except ProviderError as exc:
             raise HTTPException(503, str(exc)) from exc
 
+    @app.get('/api/limits')
+    async def limits():
+        if not hasattr(router, 'limits'):
+            return {'daily': None, 'reset_at': None}
+        try:
+            return await router.limits()
+        except ProviderError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
     @app.post('/api/matches', status_code=201)
     async def create(body: MatchRequest):
         if llm is None and not os.getenv('OPENROUTER_API_KEY'):
             raise HTTPException(503, 'Configure OPENROUTER_API_KEY no backend ou abra a demonstração.')
         try:
+            if hasattr(router, 'limits'):
+                quota = await router.limits()
+                if quota['daily'] is not None and quota['daily']['remaining'] <= 0:
+                    raise HTTPException(429, 'A franquia diária de requisições gratuitas do OpenRouter acabou. Aguarde a renovação diária ou abra a demonstração. Nenhuma partida foi iniciada.')
             free = {m['id'] for m in await router.models()}
         except ProviderError as exc:
             raise HTTPException(503, str(exc)) from exc

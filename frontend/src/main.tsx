@@ -186,6 +186,10 @@ function App() {
   const [catalog, setCatalog] = useState<{ id: string; name: string }[]>([]);
   const [models, setModels] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState(false);
+  const [quota, setQuota] = useState<{daily: {used: number; limit: number; remaining: number} | null; reset_at: string | null} | null>(null);
+  function refreshQuota() {
+    return api<NonNullable<typeof quota>>("/limits").then(setQuota).catch(() => setNotice("Não foi possível consultar a franquia gratuita. O servidor verificará o limite antes de iniciar."));
+  }
   const [match, setMatch] = useState<Match | null>(null);
   const [receivedEvents, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState("");
@@ -221,6 +225,7 @@ function App() {
   const events = playback.visible;
   const presenting = playback.pending;
   useEffect(() => {
+    void refreshQuota();
     api<{ openrouter_configured: boolean }>("/health")
       .then((x) => setConfigured(x.openrouter_configured))
       .catch(() =>
@@ -353,6 +358,7 @@ function App() {
       setMatch(m);
     } catch (e) {
       setError((e as Error).message);
+      void refreshQuota();
     } finally {
       setBusy(false);
     }
@@ -888,13 +894,19 @@ function App() {
               <button
                 className="start-button"
                 disabled={
-                  busy || live || !configured || roles.some((r) => !models[r])
+                  busy || live || !configured || quota?.daily?.remaining === 0 || roles.some((r) => !models[r])
                 }
               >
                 <Play size={15} fill="currentColor" />
                 {busy ? "Preparando audiência…" : "Iniciar audiência"}
                 <span>ATÉ 5 RODADAS</span>
               </button>
+              {quota?.daily && <div className="config-note" role="status">
+                <strong>OpenRouter: {quota.daily.remaining} de {quota.daily.limit} requisições gratuitas disponíveis hoje.</strong>
+                <p>Uma audiência usa várias requisições para argumentos, checagens e julgamento. As novas tentativas também consomem essa franquia.</p>
+                {quota.daily.remaining === 0 && <p>A franquia diária da conta acabou. Trocar de modelo não libera novas requisições. {quota.reset_at && `Renovação prevista: ${new Date(quota.reset_at).toLocaleString("pt-BR")}.`} A demonstração continua disponível.</p>}
+                <button type="button" className="text-button" onClick={() => void refreshQuota()}>Atualizar limites</button>
+              </div>}
               {!configured && (
                 <p className="config-note">
                   Configure as chaves no backend para debates reais. A

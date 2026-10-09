@@ -53,6 +53,8 @@ O juiz recebe falas e fontes, sem identificar os modelos dos debatedores. A aval
 
 ## Acompanhar as falas
 
+Antes de iniciar uma audiência, o backend consulta o contador diário de requisições gratuitas do OpenRouter. A tela exibe o restante da franquia e a renovação prevista à meia-noite UTC, no horário do navegador. Com zero requisições, a partida não é criada e a demonstração continua disponível. Uma audiência usa várias chamadas; tentativas de geração também usam a franquia. O limite diário da conta é diferente de saldo ou limite de gastos da chave, e trocar de modelo não renova essa franquia. Use **Atualizar limites** para consultar novamente.
+
 A apresentação usa uma fila independente da execução dos agentes. Por padrão, o texto aparece aos poucos e cada fala espera você clicar em **Próxima fala**. **Mostrar fala completa** revela o restante da fala atual; **Pausar**, **Automático** e as velocidades de 0,5×, 1× e 2× controlam a leitura. **Ver tudo** abre os eventos já recebidos, e **Rever** reinicia a apresentação da audiência salva. O julgamento só aparece ao chegar à sua posição na fila.
 
 O balão fica ligado ao personagem que está falando, que dá um pequeno passo à frente. O registro lateral acompanha o mesmo texto progressivo. A pausa afeta apenas a apresentação: os agentes continuam executando e o backend preserva os eventos. Para interromper as chamadas, use **Cancelar**.
@@ -82,6 +84,7 @@ Cada evento recebe número sequencial por partida em transação SQLite. Na reco
 |---|---|---|
 | GET | `/api/health` | Estado do backend e presença de configuração, sem segredos |
 | GET | `/api/models` | Catálogo atual de modelos gratuitos |
+| GET | `/api/limits` | Contador diário de requisições gratuitas e renovação prevista, sem dados da chave |
 | POST | `/api/matches` | Criar partida: `question`, `models` para os quatro papéis |
 | POST | `/api/demo` | Reproduzir demonstração gratuita |
 | GET | `/api/matches` | Histórico das 100 partidas mais recentes |
