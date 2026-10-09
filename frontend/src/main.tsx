@@ -19,8 +19,11 @@ import {
   Search,
   Gavel,
   AlertCircle,
+  Pause,
+  SkipForward,
 } from "lucide-react";
 import "./style.css";
+import { Playback } from "./playback";
 
 type Role = "defesa" | "oposicao" | "verificador" | "juiz";
 type Source = { id: number; title: string; url: string; content: string };
@@ -184,16 +187,39 @@ function App() {
   const [models, setModels] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState(false);
   const [match, setMatch] = useState<Match | null>(null);
-  const [events, setEvents] = useState<Event[]>([]);
+  const [receivedEvents, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<Match[] | null>(null);
   const [tab, setTab] = useState("todas");
-  const [replaying, setReplaying] = useState(false);
+  const [replayKey, setReplayKey] = useState(0);
+  const [, refreshPlayback] = useState(0);
+  const playback = useRef(new Playback<Event>()).current;
+  const bubbleText = useRef<HTMLDivElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const allEvents = useRef<Event[]>([]);
+  useEffect(() => {
+    playback.reset();
+    refreshPlayback(value => value + 1);
+  }, [match?.id, replayKey, playback]);
+  useEffect(() => {
+    playback.sync(receivedEvents);
+    refreshPlayback(value => value + 1);
+  }, [receivedEvents, playback]);
+  useEffect(() => {
+    let previous = performance.now();
+    const clock = setInterval(() => {
+      const now = performance.now();
+      const cursor = playback.cursor;
+      const changed = playback.tick(Math.min(now - previous, 150));
+      previous = now;
+      if (changed || cursor !== playback.cursor) refreshPlayback(value => value + 1);
+    }, 50);
+    return () => clearInterval(clock);
+  }, [playback]);
+  const events = playback.visible;
+  const presenting = playback.pending;
   useEffect(() => {
     api<{ openrouter_configured: boolean }>("/health")
       .then((x) => setConfigured(x.openrouter_configured))
@@ -216,9 +242,6 @@ function App() {
           "Catálogo indisponível no momento. A demonstração continua disponível.",
         ),
       );
-    return () => {
-      if (timer.current) clearInterval(timer.current);
-    };
   }, []);
   useEffect(() => {
     if (!match?.id) return;
@@ -238,6 +261,7 @@ function App() {
         stream.onopen = () => setNotice("");
         stream.onmessage = (e) => {
           const event: Event = JSON.parse(e.data);
+          if (!allEvents.current.some(x => x.id === event.id)) allEvents.current = [...allEvents.current, event];
           setEvents((prev) =>
             prev.some((x) => x.id === event.id) ? prev : [...prev, event],
           );
@@ -273,6 +297,9 @@ function App() {
     });
   }, [events]);
   useEffect(() => {
+    if (bubbleText.current && playback.typing) bubbleText.current.scrollTop = bubbleText.current.scrollHeight;
+  }, [events, playback]);
+  useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setHistory(null);
     };
@@ -288,7 +315,24 @@ function App() {
   const result = events.find((e) => e.type === "result")?.data;
   const round = stage?.round || last?.round || 0;
   const live = match?.status === "running";
-  const active = live || replaying ? stage?.role : undefined;
+  const active = live || presenting ? stage?.role : undefined;
+  const speaking = last && last.role === stage?.role && last.round === stage?.round && last.phase === stage?.phase;
+  function control(action: () => void) {
+    action();
+    refreshPlayback(value => value + 1);
+  }
+  function bubble(role: Role) {
+    if (active !== role) return null;
+    return <div className={`speech-bubble bubble-${role}`}>
+      <span>{labels[role]} <i>· Rodada {stage?.round}</i></span>
+      <div className="bubble-text" ref={bubbleText}>
+        <p>{speaking ? last.text : "Preparando a próxima intervenção…"}
+          {speaking && playback.typing && <span className="typing-cursor" aria-hidden="true">▌</span>}
+        </p>
+      </div>
+      <small>{speaking ? playback.typing ? "Texto progressivo · resposta validada" : "Fala completa · avance quando terminar de ler" : "Aguardando resposta"}</small>
+    </div>;
+  }
   const warnings = events.filter((e) =>
     ["warning", "interrupted", "cancelled"].includes(e.type),
   );
@@ -304,8 +348,7 @@ function App() {
           ? {}
           : { body: JSON.stringify({ question: question.trim(), models }) }),
       });
-      if (timer.current) clearInterval(timer.current);
-      setReplaying(false);
+      setReplayKey(value => value + 1);
       setEvents([]);
       setMatch(m);
     } catch (e) {
@@ -325,20 +368,10 @@ function App() {
     if (m) setMatch(m);
   }
   function replayMatch() {
-    if (timer.current) clearInterval(timer.current);
     const saved = allEvents.current;
     if (!saved.length) return;
-    setEvents([]);
-    setReplaying(true);
-    let index = 0;
-    timer.current = setInterval(() => {
-      const event = saved[index++];
-      if (event) setEvents((prev) => [...prev, event]);
-      if (index >= saved.length) {
-        clearInterval(timer.current!);
-        setReplaying(false);
-      }
-    }, 450);
+    setEvents([...saved]);
+    setReplayKey(value => value + 1);
   }
   async function openHistory() {
     try {
@@ -445,10 +478,10 @@ function App() {
           <section className="court-panel">
             <div className="panel-bar">
               <div>
-                <span className={`live-dot ${live || replaying ? "on" : ""}`} />
+                <span className={`live-dot ${live || presenting ? "on" : ""}`} />
                 {live
                   ? "AUDIÊNCIA EM ANDAMENTO"
-                  : replaying
+                  : presenting
                     ? "REPRODUZINDO AUDIÊNCIA"
                     : finished
                       ? "AUDIÊNCIA ENCERRADA"
@@ -493,6 +526,7 @@ function App() {
                   active={active === "juiz"}
                   phase={stage?.phase || ""}
                 />
+                {bubble("juiz")}
                 <div className="judge-desk">
                   <div className="desk-detail" />
                   <span>JUIZ</span>
@@ -506,6 +540,7 @@ function App() {
                   active={active === "defesa"}
                   phase={stage?.phase || ""}
                 />
+                {bubble("defesa")}
                 <div className="podium">
                   <span>DEFESA</span>
                   <i />
@@ -519,6 +554,7 @@ function App() {
                   active={active === "oposicao"}
                   phase={stage?.phase || ""}
                 />
+                {bubble("oposicao")}
                 <div className="podium">
                   <span>OPOSIÇÃO</span>
                   <i />
@@ -532,6 +568,7 @@ function App() {
                   active={active === "verificador"}
                   phase={stage?.phase || ""}
                 />
+                {bubble("verificador")}
                 <div className="research-desk">
                   <span>VERIFICADOR</span>
                   <div className="books">
@@ -548,30 +585,9 @@ function App() {
               <div className="torch torch-right">
                 <i />
               </div>
-              {last ? (
-                <div
-                  className={`speech-bubble bubble-${last.role}`}
-                  key={speeches.at(-1)?.id}
-                >
-                  <span>
-                    {labels[last.role]}{" "}
-                    <i>
-                      ·{" "}
-                      {last.phase === "aceitacao"
-                        ? last.accepted
-                          ? "Aceitou a proposta"
-                          : "Rejeitou a proposta"
-                        : `Rodada ${last.round}`}
-                    </i>
-                  </span>
-                  <p>{last.text}</p>
-                </div>
-              ) : (
+              {!match && (
                 <div className="idle-note">
-                  <span>
-                    QUANDO A DÚVIDA ENTRA,
-                    <br />O DEBATE COMEÇA.
-                  </span>
+                  <span>QUANDO A DÚVIDA ENTRA,<br />O DEBATE COMEÇA.</span>
                   <small>Escreva uma pergunta ou explore a demonstração.</small>
                 </div>
               )}
@@ -581,6 +597,26 @@ function App() {
                 </div>
               )}
             </div>
+            {match && <div className="playback-controls">
+              <div className="playback-heading">
+                <strong>{playback.paused ? "Leitura pausada" : playback.waiting ? "Sua vez de avançar" : playback.typing ? "Argumento em apresentação" : presenting ? "Próxima intervenção" : live ? "Aguardando os agentes" : "Reprodução concluída"}</strong>
+                <span>{live ? "Os agentes continuam trabalhando." : match.status === "interrupted" ? "Processamento interrompido · acompanhe as falas recebidas." : "Debate processado · leia no seu ritmo."}</span>
+              </div>
+              <div className="playback-actions">
+                <button onClick={() => control(() => { playback.paused = !playback.paused; })} disabled={!presenting}>
+                  {playback.paused ? <Play size={14} /> : <Pause size={14} />}{playback.paused ? "Continuar" : "Pausar"}
+                </button>
+                <button className="advance-button" onClick={() => control(() => playback.next())} disabled={!presenting}>
+                  <ChevronRight size={15} />{playback.typing ? "Mostrar fala completa" : "Próxima fala"}
+                </button>
+                <label><input type="checkbox" checked={playback.automatic} onChange={e => control(() => { playback.automatic = e.target.checked; })} /> Automático</label>
+                <label>Velocidade <select aria-label="Velocidade do texto" value={playback.speed} onChange={e => control(() => { playback.speed = Number(e.target.value); })}>
+                  <option value="0.5">0,5×</option><option value="1">1×</option><option value="2">2×</option>
+                </select></label>
+                <button onClick={() => control(() => playback.showAll())} disabled={!presenting}><SkipForward size={14} /> Ver tudo</button>
+              </div>
+              <small>Uma fala de cada vez. O texto aparece após a validação da resposta; pausa e velocidade controlam apenas a leitura.</small>
+            </div>}
             <div className="court-footer">
               <span>
                 <Radio size={13} />{" "}
@@ -599,7 +635,7 @@ function App() {
                     <button
                       className="text-button"
                       onClick={replayMatch}
-                      disabled={replaying}
+                      disabled={presenting}
                     >
                       <RotateCcw size={13} /> Rever
                     </button>
@@ -626,8 +662,7 @@ function App() {
             <div
               className="transcript-scroll"
               ref={log}
-              aria-live="polite"
-              aria-relevant="additions"
+              aria-label="Transcrição das falas apresentadas"
             >
               {!speeches.length ? (
                 <div className="empty-log">
@@ -992,8 +1027,7 @@ function App() {
                 <button
                   key={m.id}
                   onClick={async () => {
-                    if (timer.current) clearInterval(timer.current);
-                    setReplaying(false);
+                    setReplayKey(value => value + 1);
                     setHistory(null);
                     try {
                       const snapshot = await api<Match>("/matches/" + m.id);

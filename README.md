@@ -51,6 +51,14 @@ Consenso confirmado encerra cedo. Uma única rejeição, conclusão diferente ou
 
 O juiz recebe falas e fontes, sem identificar os modelos dos debatedores. A avaliação é apresentada como julgamento automatizado. Evidências, coerência e refutações recebem notas de 0 a 10; a nota final é a média simples. A contagem de afirmações contraditas é calculada pelas verificações com fontes e fica separada do placar. Ausência de fontes não conta automaticamente como alucinação. A classificação das fontes também é automatizada e pode errar.
 
+## Acompanhar as falas
+
+A apresentação usa uma fila independente da execução dos agentes. Por padrão, o texto aparece aos poucos e cada fala espera você clicar em **Próxima fala**. **Mostrar fala completa** revela o restante da fala atual; **Pausar**, **Automático** e as velocidades de 0,5×, 1× e 2× controlam a leitura. **Ver tudo** abre os eventos já recebidos, e **Rever** reinicia a apresentação da audiência salva. O julgamento só aparece ao chegar à sua posição na fila.
+
+O balão fica ligado ao personagem que está falando, que dá um pequeno passo à frente. O registro lateral acompanha o mesmo texto progressivo. A pausa afeta apenas a apresentação: os agentes continuam executando e o backend preserva os eventos. Para interromper as chamadas, use **Cancelar**.
+
+Esta versão usa revelação progressiva depois da validação da resposta completa. Ela não transmite tokens do modelo enquanto ele gera o JSON. A interface identifica esse comportamento como texto progressivo; falas inválidas ou raciocínio interno não são apresentados como argumentos.
+
 ## Arquitetura
 
 ```text
@@ -86,11 +94,14 @@ Documentação interativa: <http://127.0.0.1:8000/docs>.
 
 ## Validação
 
+Os testes da fila de leitura usam o suporte nativo a TypeScript do Node.js 22.6 ou superior.
+
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 cd ..\frontend
 pnpm build
+pnpm test
 ```
 
 Testes simulam as APIs, sem gastar cotas: consenso, uma única discordância, confirmação do juiz, limite de rodadas, fontes, pesquisa indisponível, preços pagos, cota, cancelamento, reconexão SSE, histórico, exportação e recuperação após reinício. Também cobrem respostas vazias, raciocínio sem fala, JSON no formato incorreto, recusas e campos de faturamento nulos. As chamadas reais de defesa, oposição e extração de afirmações foram verificadas durante a depuração; disponibilidade e limites externos podem impedir o julgamento completo.

@@ -2049,3 +2049,59 @@ h1 {
     transition: none !important;
   }
 }
+
+/* Balões ligados à estação de quem fala, com espaço para leitura. */
+.court { height: 590px; }
+.judge-station { top: 255px; }
+.defense-station, .opposition-station { top: 365px; }
+.verifier-station { bottom: 25px; }
+.station.lit { z-index: 12; }
+.station.lit .person { animation: step-forward 700ms steps(4) forwards; }
+.station.lit .pixel-body { animation: speak 700ms steps(2) infinite; }
+.speech-bubble {
+  top: auto;
+  bottom: calc(100% + 16px);
+  width: 350px;
+  max-height: none;
+  overflow: visible;
+  border: 3px solid #39463b;
+  padding: 14px;
+  border-radius: 7px;
+}
+.bubble-text { max-height: 180px; overflow: auto; scrollbar-width: thin; }
+.speech-bubble p { font-size: 14px; line-height: 1.65; min-height: 24px; overflow-wrap: anywhere; }
+.speech-bubble > small { display: block; margin-top: 10px; padding-top: 8px; border-top: 1px solid #b6bba9; font-size: 10px; color: #596650; }
+.speech-bubble:after { bottom: -11px; left: calc(50% - 9px); border-width: 3px; }
+.bubble-defesa { left: 0; transform: none; }
+.bubble-defesa:after { left: 43px; }
+.bubble-oposicao { left: auto; right: 0; transform: none; }
+.bubble-oposicao:after { left: auto; right: 43px; }
+.typing-cursor { color: #526d46; animation: pulse 1s steps(2) infinite; }
+.playback-controls { padding: 16px; background: #222c25; border-top: 1px solid var(--line); }
+.playback-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.playback-heading strong { font-size: 12px; color: var(--mint); }
+.playback-heading span { font-size: 10px; color: #b2bfa8; }
+.playback-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 13px 0; }
+.playback-actions button, .playback-actions select { background: #344335; border: 1px solid #617459; color: #e2ead9; border-radius: 4px; padding: 8px 10px; font-size: 11px; }
+.playback-actions button { display: flex; align-items: center; gap: 5px; }
+.playback-actions .advance-button { background: var(--mint); color: #243622; font-weight: 600; }
+.playback-actions label { display: flex; gap: 6px; align-items: center; font-size: 11px; color: #c3d0b8; }
+.playback-actions input { accent-color: #b8d7a4; }
+.playback-controls > small { font-size: 10px; line-height: 1.6; color: #a0b296; }
+@keyframes step-forward { from { transform: translateY(0); } to { transform: translateY(-12px); } }
+@media (max-width: 600px) {
+  .court { height: 565px; }
+  .judge-station { top: 240px; }
+  .defense-station, .opposition-station { top: 345px; }
+  .verifier-station { bottom: 22px; }
+  .speech-bubble { width: min(310px, calc(100vw - 74px)); padding: 12px; bottom: calc(100% + 12px); }
+  .speech-bubble p { font-size: 13px; }
+  .bubble-text { max-height: 155px; }
+  .speech-bubble > span { font-size: 10px; }
+  .speech-bubble > small { font-size: 9px; }
+  .playback-controls { padding: 13px; }
+  .playback-actions { gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .station.lit .person, .station.lit .pixel-body, .typing-cursor { animation: none; }
+}
