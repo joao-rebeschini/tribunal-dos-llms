@@ -180,17 +180,35 @@ class Tavily:
         headers = {'Authorization': f'Bearer {self.key}'}
         try:
             usage_response = await self.client.get('https://api.tavily.com/usage', headers=headers)
+            if usage_response.status_code == 401:
+                raise SearchUnavailable('O Tavily recusou a chave de API. Confira TAVILY_API_KEY e reinicie o backend.',
+                                        code='search_auth_error', details={'http_status': 401})
+            if usage_response.status_code == 429:
+                raise SearchUnavailable('O Tavily atingiu um limite de requisições. A pesquisa está temporariamente indisponível.',
+                                        code='search_rate_limit', details={'http_status': 429})
             if usage_response.status_code != 200:
-                raise SearchUnavailable('Não foi possível confirmar a cota gratuita do Tavily; busca bloqueada.')
+                raise SearchUnavailable('Não foi possível confirmar a cota gratuita do Tavily; busca bloqueada.',
+                                        code='search_usage_unavailable', details={'http_status': usage_response.status_code})
             account = usage_response.json().get('account') or {}
-            if any(account.get(field) is None for field in ('paygo_limit', 'paygo_usage', 'plan_usage', 'plan_limit')):
+            if any(account.get(field) is None for field in ('paygo_usage', 'plan_usage', 'plan_limit')) or 'paygo_limit' not in account:
                 raise SearchUnavailable('O Tavily não confirmou todos os limites de faturamento (campo vazio ou ausente). Por segurança, a busca foi bloqueada e a afirmação permanece inconclusiva.',
                                         code='search_billing_unknown')
-            if (str(account.get('current_plan', '')).lower() not in ('free', 'researcher') or
-                float(account.get('paygo_limit', -1)) != 0 or
-                float(account.get('paygo_usage', -1)) != 0 or
-                float(account.get('plan_usage', 1000)) >= min(float(account.get('plan_limit', 0)), self.budget)):
-                raise SearchUnavailable('Tavily fora da cota gratuita ou com cobrança por uso habilitada; busca bloqueada.')
+            # null não é interpretado como zero nem como autorização de cobrança.
+            # A busca basic só é liberada com um crédito inteiro dentro da franquia
+            # gratuita confirmada, limitada também ao teto local de 1.000 créditos.
+            plan_usage = Decimal(str(account['plan_usage']))
+            plan_limit = Decimal(str(account['plan_limit']))
+            paygo_usage = Decimal(str(account['paygo_usage']))
+            paygo_limit = Decimal(str(account['paygo_limit'])) if account['paygo_limit'] is not None else None
+            values = [plan_usage, plan_limit, paygo_usage] + ([paygo_limit] if paygo_limit is not None else [])
+            if (any(not value.is_finite() or value < 0 for value in values) or
+                str(account.get('current_plan', '')).strip().lower() not in ('free', 'researcher') or
+                (paygo_limit is not None and paygo_limit != 0) or paygo_usage != 0):
+                raise SearchUnavailable('Tavily fora do plano gratuito ou com cobrança por uso indicada; busca bloqueada.',
+                                        code='search_paid_plan_blocked')
+            if plan_usage + 1 > min(plan_limit, self.budget):
+                raise SearchUnavailable('A franquia gratuita de pesquisa está esgotada. Nenhuma busca paga foi feita.',
+                                        code='search_quota_exhausted')
             if not self.store.reserve_search(self.budget):
                 raise SearchUnavailable('Orçamento mensal local de buscas esgotado. A afirmação permanece inconclusiva.')
             # Uma chamada = um crédito basic. Nunca repete POST incerto para não duplicar gastos.
@@ -204,5 +222,5 @@ class Tavily:
                        for i, r in enumerate(response.json().get('results', [])) if safe_url(r.get('url', ''))]
             self.store.cache(query, results)
             return results
-        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, InvalidOperation) as exc:
             raise SearchUnavailable('Falha ao consultar a pesquisa; afirmação inconclusiva.') from exc

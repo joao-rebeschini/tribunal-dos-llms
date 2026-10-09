@@ -82,6 +82,23 @@ async def test_evidence_and_search_failure(tmp_path, unavailable):
         assert evidence['sources'][0]['url']=='https://example.org/source'
         assert len(store.get(mid)['result']['contradicted']['defesa'])==1
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['confirmada', 'contradita', 'inconclusiva'])
+async def test_real_search_path_preserves_each_verifier_classification(tmp_path, status):
+    class ClassifiedLLM(SimulatedLLM):
+        async def complete(self, model, system, context, schema):
+            if schema is Verification:
+                assert context['sources'][0]['url'] == 'https://example.org/source'
+                return {'status': status, 'explanation': 'Classificação com fonte válida.', 'source_ids': [0]}, model
+            return await super().complete(model, system, context, schema)
+    store = Store(tmp_path / 'db.sqlite')
+    mid = store.create('O que dizem as fontes verificadas?', {role: 'test/free' for role in ROLES})
+    await Tribunal(mid, store, ClassifiedLLM(claims=True), SimulatedSearch()).run()
+    evidence = next(event['data'] for event in store.events(mid) if event['type'] == 'evidence')
+    assert evidence['status'] == status
+    assert evidence['sources'][0]['url'] == 'https://example.org/source'
+
+
 def test_price_and_output_validation():
     assert free_model({'pricing': {'prompt':'0','completion':'0','request':'0'}})
     for pricing in [{'prompt':'1','completion':'0'}, {'prompt':'0','completion':'0','web_search':'0.01'}, {'prompt':'bad','completion':'0'}, {}]:

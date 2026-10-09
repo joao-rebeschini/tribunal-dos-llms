@@ -111,18 +111,51 @@ def test_empty_output_error_reaches_saved_events_and_sse(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tavily_null_billing_limit_is_explicitly_blocked(tmp_path):
+@pytest.mark.parametrize('usage,allowed', [(0, True), (999, True), (999.5, False), (1000, False), (1500, False)])
+async def test_tavily_null_paygo_limit_only_allows_confirmed_free_credit(tmp_path, usage, allowed):
     requests = []
     def handler(request):
         requests.append(request.method)
+        if request.method == 'POST':
+            assert json.loads(request.content)['search_depth'] == 'basic'
+            return httpx.Response(200, json={'results': [{'title': 'Fonte', 'url': 'https://example.org', 'content': 'Evidência.'}]})
         return httpx.Response(200, json={'account': {'current_plan': 'Researcher',
-            'paygo_limit': None, 'paygo_usage': 0, 'plan_usage': 0, 'plan_limit': 1500}})
+            'paygo_limit': None, 'paygo_usage': 0, 'plan_usage': usage, 'plan_limit': 1500}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        tavily = Tavily('TEST_TOKEN', Store(tmp_path / 'db.sqlite'), client=client)
+        if allowed:
+            assert (await tavily.search('consulta'))[0]['url'] == 'https://example.org'
+            assert requests == ['GET', 'POST']
+        else:
+            with pytest.raises(SearchUnavailable) as error:
+                await tavily.search('consulta')
+            assert error.value.code == 'search_quota_exhausted'
+            assert requests == ['GET']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('field,value', [('plan_usage', None), ('plan_limit', None), ('paygo_usage', None),
+    ('plan_usage', 'NaN'), ('plan_limit', 'Infinity'), ('plan_usage', -1), ('paygo_usage', 1), ('paygo_limit', 10)])
+async def test_tavily_unknown_or_paid_billing_never_searches(tmp_path, field, value):
+    account = {'current_plan': 'Researcher', 'plan_usage': 0, 'plan_limit': 1500, 'paygo_usage': 0, 'paygo_limit': None}
+    account[field] = value
+    requests = []
+    def handler(request):
+        requests.append(request.method)
+        return httpx.Response(200, json={'account': account})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(SearchUnavailable):
+            await Tavily('TEST_TOKEN', Store(tmp_path / 'db.sqlite'), client=client).search('consulta')
+    assert requests == ['GET']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,code', [(401, 'search_auth_error'), (429, 'search_rate_limit'), (503, 'search_usage_unavailable')])
+async def test_tavily_usage_http_errors_are_identified(tmp_path, status, code):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(status))) as client:
         with pytest.raises(SearchUnavailable) as error:
             await Tavily('TEST_TOKEN', Store(tmp_path / 'db.sqlite'), client=client).search('consulta')
-    assert error.value.code == 'search_billing_unknown'
-    assert 'campo vazio' in str(error.value)
-    assert requests == ['GET']
+    assert error.value.code == code
 
 
 def test_app_construction_does_not_interrupt_another_running_server(tmp_path):

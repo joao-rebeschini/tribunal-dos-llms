@@ -108,7 +108,9 @@ Testes simulam as APIs, sem gastar cotas: consenso, uma única discordância, co
 
 Se um modelo consumir a geração em raciocínio e retornar uma fala vazia, o backend aumenta o limite e tenta novamente, até três chamadas. Quando permitido pelo catálogo, o raciocínio opcional é desativado. O raciocínio interno nunca é usado como fala. Se o formato JSON estiver incorreto, a próxima tentativa recebe os erros de validação. Erros persistentes preservam o histórico e exibem uma mensagem específica.
 
-Um erro 429 do OpenRouter indica limite de requisições ou capacidade: aguarde ou escolha outro modelo gratuito e inicie uma nova partida. Se o Tavily devolver limites de faturamento vazios ou ausentes, a busca permanece bloqueada até ser possível confirmar a configuração gratuita; essa condição não vira uma falha genérica.
+Um erro 429 do OpenRouter indica limite de requisições ou capacidade: aguarde ou escolha outro modelo gratuito e inicie uma nova partida. No Tavily, `paygo_limit: null` é aceito somente quando o plano gratuito, o consumo e a franquia são confirmados e ainda existe um crédito inteiro dentro da franquia e do teto local de 1.000 créditos. O campo não é convertido em zero nem autoriza uso pago. Ausência de dados de consumo ou franquia, consumo pago, planos pagos e cota esgotada continuam bloqueando buscas. Falhas HTTP distinguem chave recusada (401), limite de requisições (429) e indisponibilidade da consulta de cota.
+
+Na validação dessa integração, uma busca real retornou três fontes. Os testes também verificam que o tribunal preserva cada classificação do verificador: confirmada, contradita ou inconclusiva, com suas fontes. Falha de pesquisa continua produzindo inconclusão, sem evidência inventada.
 
 ## Limitações da primeira versão
 
